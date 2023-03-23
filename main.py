@@ -4,22 +4,28 @@ from collections import namedtuple
 
 import pygame
 from pygame.locals import *
+
+from SnakeModel import Linear_QNet
 from button import Button
 from popup import Popup
 from record import Record
+from SnakeAgent import Agent
+from SnakeGameAI import SnakeGameAI
+from PlotHelper import plot
+import torch
 
 # UTILS VARIABLES
 COLOR_BLACK = 0, 0, 0
-COLOR_WHITE = 255, 255, 255
 
 # MODE MANAGEMENT VARIABLES
 IDLE_MODE = True
-ENTER_NAME_MODE = True
+ENTER_NAME_MODE = False
 PLAY_MODE = False
 GAME_OVER_MODE = False
 PAUSE_MODE = False
 HIGH_SCORES_MODE = False
 TRAIN_SNAKE_MODE = False
+VALIDATE_TRAIN_SNAKE_MODE = False
 TEST_SNAKE_MODE = False
 EXIT_MODE = False
 FORCE_EXIT_MODE = False
@@ -40,7 +46,6 @@ PLAY_AGAIN_BUTTON = Button((450, 390), 150, 35, "PLAY AGAIN")
 GAME_OVER_BACK_TO_MAIN_MENU_BUTTON = Button((150, 390), 150, 35, "BACK TO MENU")
 ENTER_NAME_PLAY_GAME_BUTTON = Button((450, 390), 150, 35, "PLAY GAME")
 ENTER_NAME_BACK_TO_MAIN_MENU_BUTTON = Button((150, 390), 150, 35, "BACK TO MENU")
-
 
 EXIT_YES_BUTTON = Button((180, 390), 150, 35, "YES")
 EXIT_NO_BUTTON = Button((440, 390), 150, 35, "NO")
@@ -68,6 +73,13 @@ class Direction(Enum):
     LEFT = 2
     UP = 3
     DOWN = 4
+
+
+class ControllerButtons(Enum):
+    A = 0
+    B = 1
+    X = 2
+    Y = 3
 
 
 DIRECTION = Direction.RIGHT
@@ -342,7 +354,6 @@ def onPlayGameEnter():
     DISPLAY_SCORE_POPUP.show()
 
 
-
 def onPauseMenuEnter():
     # INIT PAUSE MODE
     PAUSE_POPUP.show()
@@ -378,6 +389,7 @@ def onGameOverExit():
     PLAY_AGAIN_BUTTON.hide()
     GAME_OVER_BACK_TO_MAIN_MENU_BUTTON.hide()
 
+
 def onEnterNameEnter():
     # INIT GAME OVER MODE
     ENTER_NAME_POPUP.show()
@@ -390,12 +402,48 @@ def onEnterNameEnter():
 
 
 def onEnterNameExit():
-    # INIT GAME OVER MODE
+    # DE INIT ENTER NAME MODE
     ENTER_NAME_POPUP.hide()
 
     # BUTTON RENDER
     ENTER_NAME_PLAY_GAME_BUTTON.hide()
     ENTER_NAME_BACK_TO_MAIN_MENU_BUTTON.hide()
+
+def onTrainSankeEnter():
+    # INIT TRAIN SNAKE MODE
+    DISPLAY_SCORE_POPUP.show()
+
+def onTrainStakeExit():
+    # DE INIT TRAIN SNAKE MODE
+    DISPLAY_SCORE_POPUP.hide()
+
+
+def onValidateTrainingEnter():
+    # INIT PAUSE MODE
+    PAUSE_POPUP.show()
+
+    # BUTTON RENDER
+    PAUSE_MODE_BACK_TO_MAIN_MENU_BUTTON.show()
+    PAUSE_MODE_RETURN_BUTTON.show()
+
+def onValidateTrainingExit():
+    # DE INIT PAUSE MODE
+    PAUSE_POPUP.hide()
+
+    # BUTTON RENDER
+    PAUSE_MODE_BACK_TO_MAIN_MENU_BUTTON.hide()
+    PAUSE_MODE_RETURN_BUTTON.hide()
+
+def onTestSnakeEnter():
+    # INIT TEST SNAKE MODE
+    DISPLAY_SCORE_POPUP.show()
+
+
+def onTestSnakeExit():
+    # DE INIT TEST SNAKE MODE
+    DISPLAY_SCORE_POPUP.hide()
+
+
 
 if __name__ == '__main__':
 
@@ -406,7 +454,29 @@ if __name__ == '__main__':
     MAIN_WINDOW = pygame.display.set_mode(MAIN_WINDOW_SIZE)
     pygame.display.set_caption('Graph editor')
 
+    controller_count = pygame.joystick.get_count()
+
+    controller = None
+
+    if controller_count == 0:
+        print("No joysticks connected")
+    else:
+        print(f"Found {controller_count} controller(s)")
+        controller = pygame.joystick.Joystick(0)
+        controller.init()
+
     game = None
+
+    ###########################
+    # START TRAIN SNAKE VARIABLES
+    plot_scores = []
+    plot_mean_scores = []
+    total_score = 0
+    record = 0
+    agent = None
+    gameAI = None
+    # STOP TRAIN SNAKE VARIABLES
+    ############################
 
     onMainMenuEnter()
 
@@ -417,11 +487,121 @@ if __name__ == '__main__':
             DISPLAY_SCORE_POPUP.setText("Score: 0")
             game = SnakeGame("walls", MAIN_WINDOW)
 
+        if TRAIN_SNAKE_MODE and agent is None and gameAI is None:
+            DISPLAY_SCORE_POPUP.setText("Train Snake Score: 0")
+            gameAI = SnakeGameAI("walls", MAIN_WINDOW, DISPLAY_SCORE_POPUP)
+            agent = Agent()
+
+        if TEST_SNAKE_MODE and agent is None and gameAI is None:
+            DISPLAY_SCORE_POPUP.setText("Test Snake Score: 0")
+            gameAI = SnakeGameAI("walls", MAIN_WINDOW, DISPLAY_SCORE_POPUP, "Test")
+            model = Linear_QNet(11, 256, 3)
+            model.load_state_dict(torch.load('model/model.pth'))
+            agent = Agent(model, "Test")
+
         if not PLAY_MODE and not PAUSE_MODE:
             game = None
 
+
+
         if FORCE_EXIT_MODE:
             break
+        elif VALIDATE_TRAIN_SNAKE_MODE:
+            # check for events
+            for event in pygame.event.get():
+                # if we press a mouse button
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    mousePosX, mousePosY = event.pos
+                    # left click config
+                    if event.button == 1:
+                        if PAUSE_MODE_BACK_TO_MAIN_MENU_BUTTON.canClick(mousePosX, mousePosY):
+                            IDLE_MODE = True
+                            VALIDATE_TRAIN_SNAKE_MODE = False
+                            onValidateTrainingExit()
+                            onMainMenuEnter()
+                            break
+                        if PAUSE_MODE_RETURN_BUTTON.canClick(mousePosX, mousePosY):
+                            TRAIN_SNAKE_MODE = True
+                            VALIDATE_TRAIN_SNAKE_MODE = False
+                            onValidateTrainingExit()
+                            onTrainSankeEnter()
+                            break
+        elif TRAIN_SNAKE_MODE:
+            # check for events
+            for event in pygame.event.get():
+                # if we press a mouse button
+                if event.type == pygame.QUIT:
+                    TRAIN_SNAKE_MODE = False
+                    FORCE_EXIT_MODE = True
+                    onTrainStakeExit()
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    mousePosX, mousePosY = event.pos
+
+            # get old state
+            state_old = agent.get_state(gameAI)
+
+            # get move
+            final_move = agent.get_action(state_old)
+
+            # perform move and get new state
+            reward, done, ai_score = gameAI.play_step(final_move)
+            state_new = agent.get_state(gameAI)
+
+            # train short memory
+            agent.train_short_memory(state_old, final_move, reward, state_new, done)
+
+            # remember
+            agent.remember(state_old, final_move, reward, state_new, done)
+
+            if done:
+                # train long memory, plot result
+                gameAI.reset()
+                agent.n_games += 1
+                agent.train_long_memory()
+
+                if ai_score > record:
+                    record = ai_score
+                    agent.model.save()
+
+                print('Game', agent.n_games, 'Score', ai_score, 'Record:', record)
+
+                plot_scores.append(ai_score)
+                total_score += ai_score
+                mean_score = total_score / agent.n_games
+                plot_mean_scores.append(mean_score)
+                plot(plot_scores, plot_mean_scores)
+
+                VALIDATE_TRAIN_SNAKE_MODE = True
+                TRAIN_SNAKE_MODE = False
+                onTrainStakeExit()
+                onValidateTrainingEnter()
+        elif TEST_SNAKE_MODE:
+
+            # check for events
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    TEST_SNAKE_MODE = False
+                    FORCE_EXIT_MODE = True
+                    onTestSnakeExit()
+                # if we press a mouse button
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    mousePosX, mousePosY = event.pos
+
+            # get old state
+            state_old = agent.get_state(gameAI)
+
+            # get move
+            final_move = agent.get_action(state_old)
+
+            # perform move and get new state
+            reward, done, score = gameAI.play_step(final_move)
+
+            if done:
+                TEST_SNAKE_MODE = False
+                GAME_OVER_MODE = True
+                onTestSnakeExit()
+                onGameOverEnter()
+
         elif IDLE_MODE:
             # check for events
             for event in pygame.event.get():
@@ -439,14 +619,14 @@ if __name__ == '__main__':
                         elif TRAIN_SNAKE_BUTTON.canClick(mousePosX, mousePosY):
                             TRAIN_SNAKE_MODE = True
                             IDLE_MODE = False
-                            TRAIN_SNAKE_MODE_POPUP.show()
                             onMainMenuExit()
+                            onTrainSankeEnter()
                             break
                         elif TEST_SNAKE_BUTTON.canClick(mousePosX, mousePosY):
                             TEST_SNAKE_MODE = True
                             IDLE_MODE = False
-                            TEST_SNAKE_MODE_POPUP.show()
                             onMainMenuExit()
+                            onTestSnakeEnter()
                             break
                         elif HIGH_SCORES_BUTTON.canClick(mousePosX, mousePosY):
                             HIGH_SCORES_MODE = True
@@ -492,33 +672,36 @@ if __name__ == '__main__':
             # check for events
             for event in pygame.event.get():
                 # if we press a key button
-                if event.type == pygame.KEYDOWN:
+                if event.type == pygame.JOYBUTTONDOWN:
                     # space key config
-                    if event.key == pygame.K_SPACE:
+                    if controller.get_button(CONTROLLER_AXIS_TRIGGERRIGHT):
                         PAUSE_MODE = True
                         PLAY_MODE = False
                         onPlayGameExit()
                         onPauseMenuEnter()
                         break
-                    elif event.key == pygame.K_LEFT:
+                    elif controller.get_button(CONTROLLER_BUTTON_X):
                         if DIRECTION != Direction.RIGHT:
                             DIRECTION = Direction.LEFT
-                    elif event.key == pygame.K_RIGHT:
+                    elif controller.get_button(CONTROLLER_BUTTON_B):
                         if DIRECTION != Direction.LEFT:
                             DIRECTION = Direction.RIGHT
-                    elif event.key == pygame.K_UP:
+                    elif controller.get_button(CONTROLLER_BUTTON_Y):
                         if DIRECTION != Direction.DOWN:
                             DIRECTION = Direction.UP
-                    elif event.key == pygame.K_DOWN:
+                    elif controller.get_button(CONTROLLER_BUTTON_A):
                         if DIRECTION != Direction.UP:
                             DIRECTION = Direction.DOWN
+
             # play the game
             game_over, score = game.play_step(DIRECTION)
+
             if game_over:
                 PLAY_MODE = False
                 GAME_OVER_MODE = True
                 onPlayGameExit()
                 onGameOverEnter()
+
         elif GAME_OVER_MODE:
             # check for events
             for event in pygame.event.get():
@@ -528,16 +711,25 @@ if __name__ == '__main__':
                     # left click config
                     if event.button == 1:
                         if PLAY_AGAIN_BUTTON.canClick(mousePosX, mousePosY):
-                            PLAY_MODE = True
-                            GAME_OVER_MODE = False
-                            onGameOverExit()
-                            onPlayGameEnter()
+                            if gameAI is not None and agent is not None:
+                                TEST_SNAKE_MODE = True
+                                GAME_OVER_MODE = False
+                                gameAI = None
+                                agent = None
+                                onGameOverExit()
+                                onTestSnakeEnter()
+                            else:
+                                PLAY_MODE = True
+                                GAME_OVER_MODE = False
+                                onGameOverExit()
+                                onPlayGameEnter()
                             break
                         elif GAME_OVER_BACK_TO_MAIN_MENU_BUTTON.canClick(mousePosX, mousePosY):
                             IDLE_MODE = True
                             GAME_OVER_MODE = False
                             onGameOverExit()
                             onMainMenuEnter()
+                            break
         elif PAUSE_MODE:
             # check for events
             for event in pygame.event.get():
@@ -582,6 +774,7 @@ if __name__ == '__main__':
                     if event.button == 1:
                         if EXIT_YES_BUTTON.canClick(mousePosX, mousePosY):
                             # Quit Pygame
+                            EXIT_MODE = False
                             FORCE_EXIT_MODE = True
                             onExitModeExit()
                             break
@@ -598,7 +791,7 @@ if __name__ == '__main__':
         HIGH_SCORES_RETURN_BUTTON.render(MAIN_WINDOW, False)
         TRAIN_SNAKE_BUTTON.render(MAIN_WINDOW, TRAIN_SNAKE_MODE)
         TEST_SNAKE_BUTTON.render(MAIN_WINDOW, TEST_SNAKE_MODE)
-        EXIT_GAME_BUTTON.render(MAIN_WINDOW, EXIT_MODE)
+        EXIT_GAME_BUTTON.render(MAIN_WINDOW, False)
         EXIT_YES_BUTTON.render(MAIN_WINDOW, False)
         EXIT_NO_BUTTON.render(MAIN_WINDOW, False)
         PAUSE_MODE_BACK_TO_MAIN_MENU_BUTTON.render(MAIN_WINDOW, False)
